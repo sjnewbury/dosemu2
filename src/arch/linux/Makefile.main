@@ -84,6 +84,7 @@ ifeq ($(OS),Darwin)
 else
 	$(LD) $(ALL_LDFLAGS) $(DOSBIN_LDFLAGS) -o $@ \
 	   -Wl,--whole-archive $(LIBS_) -Wl,--no-whole-archive $(LIBS) \
+	   /home/stas/src/djgpp-cvs/src/djdev64/libdjdev64.so \
 	   -Wl,-Map=$(BINPATH)/bin/dosemu.map
 endif
 

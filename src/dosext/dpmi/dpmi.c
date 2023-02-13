@@ -48,6 +48,8 @@ extern long int __sysconf (int); /* for Debian eglibc 2.13-3 */
 #include <sys/syscall.h>
 #include <Asm/ldt.h>
 
+#include <djdev64.h>
+
 #include "version.h"
 #include "emu.h"
 #include "dosemu_config.h"
@@ -1493,6 +1495,7 @@ static void get_ext_API(cpuctx_t *scp)
 {
       char *ptr = SEL_ADR_CLNT(_ds, _esi, DPMI_CLIENT.is_32);
       D_printf("DPMI: GetVendorAPIEntryPoint: %s\n", ptr);
+      _eflags &= ~CF;
       if (!strcmp("VIRTUAL SUPPORT", ptr)) {
 	_LO(ax) = 0;
       } else
@@ -1514,6 +1517,10 @@ static void get_ext_API(cpuctx_t *scp)
 	_LO(ax) = 0;
 	_es = dpmi_sel();
 	_edi = DPMI_SEL_OFF(DPMI_reinit);
+      } else if (!strcmp("DJ64", ptr)) {
+	_LO(ax) = 0;
+	_es = dpmi_sel();
+	_edi = DPMI_SEL_OFF(DPMI_dj64);
       } else {
 	if (!(_LWORD(eax)==0x168a))
 	  _eax = 0x8001;
@@ -3282,6 +3289,29 @@ static int prev_clnt(void)
   return prv;
 }
 
+static void dpmi_dj64_open(cpuctx_t *scp)
+{
+  int handle = (_LWORD(esi) << 16) | _LWORD(edi);
+  const char *mp = "/dev/shm";
+  char *path;
+  dpmi_pm_block *ptr;
+  int djh;
+
+  _eflags &= ~CF;
+  ptr = lookup_pm_block(&DPMI_CLIENT.pm_block_root, handle);
+  path = assemble_path(mp, ptr->rshmname + 1);
+  djh = djdev64_open(path);
+  free(path);
+  if (djh == -1) {
+    _eflags |= CF;
+  } else {
+    _eax = djh;
+    _es = dpmi_sel();
+    _edi = DPMI_SEL_OFF(DPMI_dj64_call);
+    _esi = DPMI_SEL_OFF(DPMI_dj64_ctrl);
+  }
+}
+
 static void dpmi_cleanup(void)
 {
   D_printf("DPMI: cleanup\n");
@@ -4793,6 +4823,28 @@ static void do_dpmi_hlt(cpuctx_t *scp, uint8_t *lina, void *sp)
 
         } else if (_eip==1+DPMI_SEL_OFF(DPMI_reinit)) {
           dpmi_reinit(scp);
+
+        } else if (_eip==1+DPMI_SEL_OFF(DPMI_dj64)) {
+          switch (_ebx) {
+          case 0:
+            if (_eax == 0)
+              dpmi_dj64_open(scp);
+            break;
+          case 1:
+            djdev64_close(_eax);
+            break;
+          default:
+            error("dj64: unknown cmd %x\n", _eax);
+            break;
+          }
+
+        } else if (_eip==1+DPMI_SEL_OFF(DPMI_dj64_call)) {
+          unsigned char *sp = SEL_ADR(_ss, _edx);  // sp in edx
+          djdev64_call(_eax, _ebx, _ecx, sp);
+
+        } else if (_eip==1+DPMI_SEL_OFF(DPMI_dj64_ctrl)) {
+          unsigned char *sp = SEL_ADR(_ss, _edx);  // sp in edx
+          djdev64_ctrl(_eax, _ebx, _ecx, sp);
 
 	} else if ((_eip>=1+DPMI_SEL_OFF(DPMI_exception)) && (_eip<=32+DPMI_SEL_OFF(DPMI_exception))) {
 	  int excp = _eip-1-DPMI_SEL_OFF(DPMI_exception);
